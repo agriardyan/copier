@@ -2,6 +2,7 @@ package copier
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"reflect"
 )
@@ -172,6 +173,10 @@ func set(to, from reflect.Value) bool {
 			to = to.Elem()
 		}
 
+		if attemptSetSpecialObject(from, to) {
+			return true
+		}
+
 		if from.Type().ConvertibleTo(to.Type()) {
 			to.Set(from.Convert(to.Type()))
 		} else if scanner, ok := to.Addr().Interface().(sql.Scanner); ok {
@@ -186,4 +191,48 @@ func set(to, from reflect.Value) bool {
 		}
 	}
 	return true
+}
+
+func attemptSetSpecialObject(from, to reflect.Value) bool {
+
+	if from.IsZero() {
+		return true
+	}
+
+	if from.Kind() == reflect.String && to.Type().String() == "primitive.ObjectID" {
+		hexStr := from.String()
+		oid, err := objectIDFromHex(hexStr)
+		if err != nil {
+			return false
+		}
+		oidVal := reflect.ValueOf(oid)
+		to.Set(oidVal)
+		return true
+	}
+
+	if to.Kind() == reflect.String && from.Type().String() == "primitive.ObjectID" {
+		oid := from.Slice(0, from.Len()).Bytes()
+		oidStr := hex.EncodeToString(oid)
+		to.SetString(oidStr)
+		return true
+	}
+
+	return false
+}
+
+// objectIDFromHex create mongo ObjectID from a hex string.
+func objectIDFromHex(s string) ([12]byte, error) {
+	var objID [12]byte
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return objID, err
+	}
+
+	if len(b) != 12 {
+		return objID, errors.New("not [12]byte hex")
+	}
+
+	copy(objID[:], b[:])
+
+	return objID, nil
 }
